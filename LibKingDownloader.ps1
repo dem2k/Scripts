@@ -11,34 +11,35 @@ function Main() {
         # "<p>-- $i --</p>"
         "</section>"
         $progressPreference = 'Continue'
-        Write-Progress -Activity "Downloading Pages..." -Status "Page $i" -PercentComplete ($i/$Pages*100)
+        Write-Progress -Activity "Downloading Pages..." -Status "Page $i" -PercentComplete ($i / $Pages * 100)
     }
     Get-Fb2Footer
 }
 
 function Fetch-DocumentInfo($Url) {
+    $Author = "Unknown Author"
+    $Title  = "Unknown Title"
+    $Genre  = "unrecognised"
     $content = (Invoke-WebRequest $Url | select Content) -split "`n"
+    
     $content | where {$_ -match '<meta property="og:title" content="(.*?)" />'} | Out-Null
     if ($Matches) {
-        $Matches[1] -split " - "
-    }
-    else {
-        "Unknown Author", "Unknown Title"
+        $Author = ($Matches[1] -split " - ")[0]
+        $Title = ($Matches[1] -split " - ")[1]
     }
 
     $content | where {$_ -match '<a itemprop="genre".*?>(.*?)</a>'} | Out-Null
     if ($Matches) {
-        $Matches[1].tolower()
-    }
-    else {
-        "unrecognised"
+        $Genre = $Matches[1].tolower()
     }
 
+    # result
+    $Author,$Title,$Genre
 }
 
 function Fetch-Page ($Url) {
     $lines = (Invoke-WebRequest $Url | select Content) -split "`n"
-    Filter-PageContent $lines | foreach {Filter-Html $_}
+    Filter-PageContent $lines | Filter-Html
 }
 
 function Filter-PageContent($RawContent) {
@@ -61,15 +62,19 @@ function Filter-PageContent($RawContent) {
     $RawContent[$startIdx..$endIdx]
 }
 
-function Filter-Html($line) {
-    $line -replace "<div.*?>", "<title>" -replace "</div>", "</title>" -replace "&nbsp;"," " -replace "<br>",""
+function Filter-Html {
+    param(
+        [Parameter(Mandatory, ValueFromPipeline)]$HtmlText
+    )
+    process {
+        $HtmlText -replace "<div.*?>", "<title>" -replace "</div>", "</title>" -replace "&nbsp;", " " -replace "<br>", "<empty-line/>" -replace "<em>","<emphasis>" -replace "</em>","</emphasis>"
+    }
 }
 
 function Get-Fb2Header { 
-    @"
+@"
 <?xml version="1.0" encoding="UTF-8"?>
 <FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:xlink="http://www.w3.org/1999/xlink">
-<description>
     <description>
         <title-info>
             <genre>$Genre</genre>
@@ -91,13 +96,12 @@ function Get-Fb2Header {
 }
     
 function Get-Fb2Footer {
-    @"
+@"
 </body>
 </FictionBook>
 "@
 }
 
-#$progressPreference = "silentlyContinue"
 $Author, $Title, $Genre = Fetch-DocumentInfo $Url
 $outputFile = "{0} - {1}.fb2" -f $Author, $Title
 Main | Out-File $outputFile -Encoding utf8
